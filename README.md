@@ -1,4 +1,4 @@
-# Decentralized Autonomous Community - Smart Contract platform for easy start digital Community.
+# Decentralized Autonomous Community - Smart Contract platform for easy launch a digital Community.
 
 [![Build status](https://badge.buildkite.com/370fe5c79410f7d695e4e34c500b4e86e3ac021c6b1f739e20.svg?branch=master)](https://buildkite.com/EOSIO/eosio)
 
