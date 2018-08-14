@@ -192,7 +192,7 @@ endif()
 message( STATUS "Using '${CORE_SYMBOL_NAME}' as CORE symbol name" )
 
 if ("${EOSIO_ROOT_KEY}" STREQUAL "")
-   set(EOSIO_ROOT_KEY "DCM6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV")
+   set(EOSIO_ROOT_KEY "EOS7HmDQfBq7MpS2ifNSyLMDsntoYJWX9QU7gYo7syYivHJbq3q5A")
 endif()
 
 message( STATUS "Using '${EOSIO_ROOT_KEY}' as public key for 'eosio' account" )
