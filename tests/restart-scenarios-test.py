@@ -6,7 +6,6 @@ from WalletMgr import WalletMgr
 from TestHelper import TestHelper
 
 import random
-import traceback
 
 ###############################################################
 # Test for different nodes restart scenarios.
@@ -25,11 +24,7 @@ import traceback
 
 
 Print=Utils.Print
-
-def errorExit(msg="", errorCode=1):
-    Print("ERROR:", msg)
-    traceback.print_stack(limit=-1)
-    exit(errorCode)
+errorExit=Utils.errorExit
 
 args=TestHelper.parse_args({"-p","-d","-s","-c","--kill-sig","--kill-count","--keep-logs","--p2p-plugin"
                             ,"--dump-error-details","-v","--leave-running","--clean-run"})
@@ -57,6 +52,7 @@ walletMgr=WalletMgr(True)
 
 try:
     TestHelper.printSystemInfo("BEGIN")
+    cluster.setWalletMgr(walletMgr)
 
     cluster.setChainStrategy(chainSyncStrategyStr)
     cluster.setWalletMgr(walletMgr)
@@ -79,17 +75,10 @@ try:
         errorExit("Cluster never stabilized")
 
     Print("Stand up EOS wallet keosd")
-    walletMgr.killall(allInstances=killAll)
-    walletMgr.cleanup()
-    if walletMgr.launch() is False:
-        errorExit("Failed to stand up keosd.")
-
     accountsCount=total_nodes
     walletName="MyWallet"
     Print("Creating wallet %s if one doesn't already exist." % walletName)
     wallet=walletMgr.create(walletName, [cluster.eosioAccount,cluster.defproduceraAccount,cluster.defproducerbAccount])
-    if wallet is None:
-        errorExit("Failed to create wallet %s" % (walletName))
 
     Print ("Populate wallet with %d accounts." % (accountsCount))
     if not cluster.populateWallet(accountsCount, wallet):

@@ -14,10 +14,7 @@ import signal
 
 
 Print=Utils.Print
-
-def errorExit(msg="", errorCode=1):
-    Print("ERROR:", msg)
-    exit(errorCode)
+errorExit=Utils.errorExit
 
 args = TestHelper.parse_args({"--keep-logs","--dump-error-details","-v","--leave-running","--clean-run"})
 debug=args.v
@@ -81,28 +78,31 @@ try:
         errorExit("Failed to stand up eos cluster.")
 
     node=cluster.getNode(0)
-    if node is None:
-        errorExit("Cluster in bad state, received None node")
 
     Print("Kill cluster nodes.")
     cluster.killall(allInstances=killAll)
-    
+
     Print("Restart nodeos repeatedly to ensure dirty database flag sticks.")
-    timeout=3
-    
+    timeout=6
+
     for i in range(1,4):
         Print("Attempt %d." % (i))
         ret = runNodeosAndGetOutput(timeout)
         assert(ret)
         assert(isinstance(ret, tuple))
-        assert(ret[0])
+        if not ret[0]:
+            errorExit("Failed to startup nodeos sucessfully on try number %d" % (i))
         assert(ret[1])
         assert(isinstance(ret[1], dict))
         # pylint: disable=unsubscriptable-object
         stderr= ret[1]["stderr"]
         retCode=ret[1]["returncode"]
-        assert retCode == 2, "actual return code: %s" % str(retCode)
-        assert("database dirty flag set" in stderr)
+        expectedRetCode=2
+        if retCode != expectedRetCode:
+            errorExit("Expected return code to be %d, but instead received %d." % (expectedRetCode, retCode))
+        db_dirty_msg="database dirty flag set"
+        if db_dirty_msg not in stderr:
+            errorExit("stderr should have contained \"%s\" but it did not. stderr=\n%s" % (db_dirty_msg, stderr))
 
     if debug: Print("Setting test result to success.")
     testSuccessful=True

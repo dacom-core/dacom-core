@@ -6,6 +6,7 @@
 
 #include <eosio/chain/abi_serializer.hpp>
 #include <eosio/chain/account_object.hpp>
+#include <eosio/chain/snapshot.hpp>
 
 namespace chainbase {
    class database;
@@ -36,13 +37,20 @@ namespace eosio { namespace chain {
    enum class db_read_mode {
       SPECULATIVE,
       HEAD,
+      READ_ONLY,
       IRREVERSIBLE
+   };
+
+   enum class validation_mode {
+      FULL,
+      LIGHT
    };
 
    class controller {
       public:
 
          struct config {
+            flat_set<account_name>   sender_bypass_whiteblacklist;
             flat_set<account_name>   actor_whitelist;
             flat_set<account_name>   actor_blacklist;
             flat_set<account_name>   contract_whitelist;
@@ -55,16 +63,21 @@ namespace eosio { namespace chain {
             uint64_t                 state_guard_size       =  chain::config::default_state_guard_size;
             uint64_t                 reversible_cache_size  =  chain::config::default_reversible_cache_size;
             uint64_t                 reversible_guard_size  =  chain::config::default_reversible_guard_size;
+            uint16_t                 thread_pool_size       =  chain::config::default_controller_thread_pool_size;
             bool                     read_only              =  false;
             bool                     force_all_checks       =  false;
+            bool                     disable_replay_opts    =  false;
             bool                     contracts_console      =  false;
+            bool                     allow_ram_billing_in_notify = false;
 
             genesis_state            genesis;
             wasm_interface::vm_type  wasm_runtime = chain::config::default_wasm_runtime;
 
-            db_read_mode             read_mode    = db_read_mode::SPECULATIVE;
+            db_read_mode             read_mode              = db_read_mode::SPECULATIVE;
+            validation_mode          block_validation_mode  = validation_mode::FULL;
 
             flat_set<account_name>   resource_greylist;
+            flat_set<account_name>   trusted_producers;
          };
 
          enum class block_status {
@@ -77,7 +90,8 @@ namespace eosio { namespace chain {
          controller( const config& cfg );
          ~controller();
 
-         void startup();
+         void add_indices();
+         void startup( std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot = nullptr );
 
          /**
           * Starts a new pending block session upon which new transactions can
@@ -98,6 +112,7 @@ namespace eosio { namespace chain {
           */
          vector<transaction_metadata_ptr> get_unapplied_transactions() const;
          void drop_unapplied_transaction(const transaction_metadata_ptr& trx);
+         void drop_all_unapplied_transactions();
 
          /**
           * These transaction IDs represent transactions available in the head chain state as scheduled
@@ -126,26 +141,34 @@ namespace eosio { namespace chain {
          void commit_block();
          void pop_block();
 
-         void push_block( const signed_block_ptr& b, block_status s = block_status::complete );
+         std::future<block_state_ptr> create_block_state_future( const signed_block_ptr& b );
+         void push_block( std::future<block_state_ptr>& block_state_future );
 
-         /**
-          * Call this method when a producer confirmation is received, this might update
-          * the last bft irreversible block and/or cause a switch of forks
-          */
-         void push_confirmation( const header_confirmation& c );
+         const chainbase::database& db()const;
 
-         chainbase::database& db()const;
-
-         fork_database& fork_db()const;
+         const fork_database& fork_db()const;
 
          const account_object&                 get_account( account_name n )const;
          const global_property_object&         get_global_properties()const;
          const dynamic_global_property_object& get_dynamic_global_properties()const;
-         const permission_object&              get_permission( const permission_level& level )const;
          const resource_limits_manager&        get_resource_limits_manager()const;
          resource_limits_manager&              get_mutable_resource_limits_manager();
          const authorization_manager&          get_authorization_manager()const;
          authorization_manager&                get_mutable_authorization_manager();
+
+         const flat_set<account_name>&   get_actor_whitelist() const;
+         const flat_set<account_name>&   get_actor_blacklist() const;
+         const flat_set<account_name>&   get_contract_whitelist() const;
+         const flat_set<account_name>&   get_contract_blacklist() const;
+         const flat_set< pair<account_name, action_name> >& get_action_blacklist() const;
+         const flat_set<public_key_type>& get_key_blacklist() const;
+
+         void   set_actor_whitelist( const flat_set<account_name>& );
+         void   set_actor_blacklist( const flat_set<account_name>& );
+         void   set_contract_whitelist( const flat_set<account_name>& );
+         void   set_contract_blacklist( const flat_set<account_name>& );
+         void   set_action_blacklist( const flat_set< pair<account_name, action_name> >& );
+         void   set_key_blacklist( const flat_set<public_key_type>& );
 
          uint32_t             head_block_num()const;
          time_point           head_block_time()const;
@@ -159,8 +182,9 @@ namespace eosio { namespace chain {
          time_point           fork_db_head_block_time()const;
          account_name         fork_db_head_block_producer()const;
 
-         time_point      pending_block_time()const;
-         block_state_ptr pending_block_state()const;
+         time_point              pending_block_time()const;
+         block_state_ptr         pending_block_state()const;
+         optional<block_id_type> pending_producer_block_id()const;
 
          const producer_schedule_type&    active_producers()const;
          const producer_schedule_type&    pending_producers()const;
@@ -177,17 +201,23 @@ namespace eosio { namespace chain {
 
          block_id_type get_block_id_for_num( uint32_t block_num )const;
 
+         sha256 calculate_integrity_hash()const;
+         void write_snapshot( const snapshot_writer_ptr& snapshot )const;
+
+         bool sender_avoids_whitelist_blacklist_enforcement( account_name sender )const;
+         void check_actor_list( const flat_set<account_name>& actors )const;
          void check_contract_list( account_name code )const;
          void check_action_list( account_name code, action_name action )const;
          void check_key_list( const public_key_type& key )const;
          bool is_producing_block()const;
+
+         bool is_ram_billing_in_notify_allowed()const;
 
          void add_resource_greylist(const account_name &name);
          void remove_resource_greylist(const account_name &name);
          bool is_resource_greylisted(const account_name &name) const;
          const flat_set<account_name> &get_resource_greylist() const;
 
-         void validate_referenced_accounts( const transaction& t )const;
          void validate_expiration( const transaction& t )const;
          void validate_tapos( const transaction& t )const;
          void validate_db_available_size() const;
@@ -197,13 +227,18 @@ namespace eosio { namespace chain {
 
          int64_t set_proposed_producers( vector<producer_key> producers );
 
+         bool light_validation_allowed(bool replay_opts_disabled_by_policy) const;
          bool skip_auth_check()const;
+         bool skip_db_sessions( )const;
+         bool skip_db_sessions( block_status bs )const;
+         bool skip_trx_checks()const;
 
          bool contracts_console()const;
 
          chain_id_type get_chain_id()const;
 
          db_read_mode get_read_mode()const;
+         validation_mode get_validation_mode()const;
 
          void set_subjective_cpu_leeway(fc::microseconds leeway);
 
@@ -252,6 +287,10 @@ namespace eosio { namespace chain {
          }
 
       private:
+         friend class apply_context;
+         friend class transaction_context;
+
+         chainbase::database& mutable_db()const;
 
          std::unique_ptr<controller_impl> my;
 
@@ -270,8 +309,10 @@ FC_REFLECT( eosio::chain::controller::config,
             (reversible_cache_size)
             (read_only)
             (force_all_checks)
+            (disable_replay_opts)
             (contracts_console)
             (genesis)
             (wasm_runtime)
             (resource_greylist)
+            (trusted_producers)
           )

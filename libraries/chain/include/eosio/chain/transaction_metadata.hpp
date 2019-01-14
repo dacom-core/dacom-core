@@ -4,8 +4,8 @@
  */
 #pragma once
 #include <eosio/chain/transaction.hpp>
-#include <eosio/chain/block.hpp>
-#include <eosio/chain/trace.hpp>
+#include <eosio/chain/types.hpp>
+#include <future>
 
 namespace eosio { namespace chain {
 
@@ -20,16 +20,19 @@ class transaction_metadata {
       signed_transaction                                         trx;
       packed_transaction                                         packed_trx;
       optional<pair<chain_id_type, flat_set<public_key_type>>>   signing_keys;
+      std::future<pair<chain_id_type,flat_set<public_key_type>>> signing_keys_future;
       bool                                                       accepted = false;
+      bool                                                       implicit = false;
+      bool                                                       scheduled = false;
 
-      transaction_metadata( const signed_transaction& t, packed_transaction::compression_type c = packed_transaction::none )
+      explicit transaction_metadata( const signed_transaction& t, packed_transaction::compression_type c = packed_transaction::none )
       :trx(t),packed_trx(t, c) {
          id = trx.id();
          //raw_packed = fc::raw::pack( static_cast<const transaction&>(trx) );
          signed_id = digest_type::hash(packed_trx);
       }
 
-      transaction_metadata( const packed_transaction& ptrx )
+      explicit transaction_metadata( const packed_transaction& ptrx )
       :trx( ptrx.get_signed_transaction() ), packed_trx(ptrx) {
          id = trx.id();
          //raw_packed = fc::raw::pack( static_cast<const transaction&>(trx) );
@@ -37,8 +40,16 @@ class transaction_metadata {
       }
 
       const flat_set<public_key_type>& recover_keys( const chain_id_type& chain_id ) {
-         if( !signing_keys || signing_keys->first != chain_id ) // Unlikely for more than one chain_id to be used in one nodeos instance
-            signing_keys = std::make_pair( chain_id, trx.get_signature_keys( chain_id ) );
+         // Unlikely for more than one chain_id to be used in one nodeos instance
+         if( !signing_keys || signing_keys->first != chain_id ) {
+            if( signing_keys_future.valid() ) {
+               signing_keys = signing_keys_future.get();
+               if( signing_keys->first == chain_id ) {
+                  return signing_keys->second;
+               }
+            }
+            signing_keys = std::make_pair( chain_id, trx.get_signature_keys( chain_id ));
+         }
          return signing_keys->second;
       }
 

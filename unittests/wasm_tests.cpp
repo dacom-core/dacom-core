@@ -16,9 +16,6 @@
 #include <noop/noop.wast.hpp>
 #include <noop/noop.abi.hpp>
 
-#include <eosio.system/eosio.system.wast.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
-
 #include <fc/io/fstream.hpp>
 
 #include <Runtime/Runtime.h>
@@ -516,76 +513,6 @@ BOOST_FIXTURE_TEST_CASE(misaligned_tests, tester ) try {
    check_aligned(aligned_const_ref_wast);
    check_aligned(misaligned_const_ref_wast);
 } FC_LOG_AND_RETHROW()
-
-// test cpu usage
-
-/*  Comment out this test due to not being robust to changes
-BOOST_FIXTURE_TEST_CASE(cpu_usage_tests, tester ) try {
-#warning This test does not appear to be very robust.
-   create_accounts( {N(f_tests)} );
-   bool pass = false;
-
-   std::string code = R"=====(
-(module
-  (import "env" "require_auth" (func $require_auth (param i64)))
-  (import "env" "eosio_assert" (func $eosio_assert (param i32 i32)))
-   (table 0 anyfunc)
-   (memory $0 1)
-   (export "apply" (func $apply))
-   (func $test1 (param $0 i64))
-   (func $test2 (param $0 i64) (result i64) (i64.add (get_local $0) (i64.const 32)))
-   (func $apply (param $0 i64)(param $1 i64)(param $2 i64)
-   )=====";
-   for (int i = 0; i < 1024; ++i) {
-      code += "(call $test1 (call $test2(i64.const 1)))\n";
-   }
-   code += "))";
-
-   produce_blocks(1);
-   set_code(N(f_tests), code.c_str());
-   produce_blocks(10);
-
-   uint32_t start = config::default_per_signature_cpu_usage + config::default_base_per_transaction_cpu_usage;
-   start += 100 * ( config::default_base_per_action_cpu_usage
-                    + config::determine_payers_cpu_overhead_per_authorization
-                    + config::base_check_authorization_cpu_per_authorization );
-   start += config::resource_processing_cpu_overhead_per_billed_account;
-   start /= 1024;
-   start += 3077; // injected checktime amount
-   --start;
-   wdump((start));
-   uint32_t end   = start + 5;
-   uint32_t limit = start;
-   for( limit = start; limit < end; ++limit ) {
-      signed_transaction trx;
-
-      for (int i = 0; i < 100; ++i) {
-         action act;
-         act.account = N(f_tests);
-         act.name = N() + (i * 16);
-         act.authorization = vector<permission_level>{{N(f_tests),config::active_name}};
-         trx.actions.push_back(act);
-      }
-
-      set_transaction_headers(trx);
-      trx.max_cpu_usage_ms = limit++;
-      trx.sign(get_private_key( N(f_tests), "active" ), control->get_chain_id());
-
-      try {
-         push_transaction(trx);
-         produce_blocks(1);
-         BOOST_REQUIRE_EQUAL(true, chain_has_transaction(trx.id()));
-         break;
-      } catch (eosio::chain::tx_cpu_usage_exceeded &) {
-      }
-
-      BOOST_REQUIRE_EQUAL(true, validate());
-   }
-   wdump((limit));
-   BOOST_CHECK_EQUAL(true, start < limit && limit < end);
-} FC_LOG_AND_RETHROW()
-*/
-
 
 // test weighted cpu limit
 BOOST_FIXTURE_TEST_CASE(weighted_cpu_limit_tests, tester ) try {
@@ -1731,6 +1658,11 @@ INCBIN(leak_readGlobals, "leak_readGlobals.wasm");
 INCBIN(leak_readImports, "leak_readImports.wasm");
 INCBIN(leak_wasm_binary_cpp_L1249, "leak_wasm_binary_cpp_L1249.wasm");
 INCBIN(readFunctions_slowness_out_of_memory, "readFunctions_slowness_out_of_memory.wasm");
+INCBIN(locals_yc, "locals-yc.wasm");
+INCBIN(locals_s, "locals-s.wasm");
+INCBIN(slowwasm_localsets, "slowwasm_localsets.wasm");
+INCBIN(getcode_deepindent, "getcode_deepindent.wasm");
+INCBIN(indent_mismatch, "indent-mismatch.wasm");
 INCBIN(deep_loops_ext_report, "deep_loops_ext_report.wasm");
 INCBIN(80k_deep_loop_with_ret, "80k_deep_loop_with_ret.wasm");
 INCBIN(80k_deep_loop_with_void, "80k_deep_loop_with_void.wasm");
@@ -1858,6 +1790,18 @@ BOOST_FIXTURE_TEST_CASE( fuzz, TESTER ) try {
       BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
    }
    {
+      vector<uint8_t> wasm(glocals_ycData, glocals_ycData + glocals_ycSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(glocals_sData, glocals_sData + glocals_sSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
+      vector<uint8_t> wasm(gslowwasm_localsetsData, gslowwasm_localsetsData + gslowwasm_localsetsSize);
+      BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_serialization_error);
+   }
+   {
       vector<uint8_t> wasm(gdeep_loops_ext_reportData, gdeep_loops_ext_reportData + gdeep_loops_ext_reportSize);
       BOOST_CHECK_THROW(set_code(N(fuzzy), wasm), wasm_execution_error);
    }
@@ -1871,6 +1815,13 @@ BOOST_FIXTURE_TEST_CASE( fuzz, TESTER ) try {
    }
 
    produce_blocks(1);
+} FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( getcode_checks, TESTER ) try {
+   vector<uint8_t> wasm(ggetcode_deepindentData, ggetcode_deepindentData + ggetcode_deepindentSize);
+   wasm_to_wast( wasm.data(), wasm.size(), true );
+   vector<uint8_t> wasmx(gindent_mismatchData, gindent_mismatchData + gindent_mismatchSize);
+   wasm_to_wast( wasmx.data(), wasmx.size(), true );
 } FC_LOG_AND_RETHROW()
 
 
